@@ -1,0 +1,1 @@
+ghc -package containers -package mtl -O5 -o dicem dicem.hs && ./dicem > data.dat && gnuplot plot.gnu
