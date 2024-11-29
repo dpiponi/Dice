@@ -1,3 +1,4 @@
+
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE GADTs, FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -9,10 +10,10 @@ module Main where
 import Debug.Trace
 import Control.Monad
 import Control.Monad.Trans
-import Control.Applicative
+--import Control.Applicative
 import Control.Monad.Identity
 import Control.Arrow
-import Data.Ratio
+--import Data.Ratio
 import Data.Ord
 import Control.Monad.Reader
 import Control.Monad.State
@@ -24,13 +25,22 @@ data P p a where
     POrd :: Ord a => M.Map a p -> P p a
     PAny :: [(a, p)] -> P p a
 
-returnP :: (Ord p, Num p, Ord a) => a -> P p a
-returnP a = POrd $ M.singleton a 1
+instance (Show p, Show a, Ord a) => Show (P p a) where
+    show (POrd m) = "POrd " ++ show m
+    show (PAny l) = "PAny " ++ show l
 
 -- Trim out zero prob XXX
 
 fromList :: (Num p, Ord a) => [(a, p)] -> M.Map a p
 fromList = M.fromListWith (+)
+
+instance Functor (P p) where
+  fmap f (POrd ps) = PAny $ map (\(a, b) -> (f a, b)) $ M.toList ps
+  fmap f (PAny ps) = PAny $ map (\(a, b) -> (f a, b)) ps
+
+returnP :: (Ord p, Num p, Ord a) => a -> P p a
+returnP a = POrd $ M.singleton a 1
+
 
 union :: (Num p, Ord a) => M.Map a p -> M.Map a p -> M.Map a p
 union = M.unionWith (+)
@@ -42,7 +52,7 @@ scaleMap :: (Num p, Ord a) => p -> M.Map a p -> M.Map a p
 scaleMap weight = fromList . scaleList weight . M.toList
 
 collectMapM :: (Num p, Monad m) => (a -> m (P p b)) -> [(a, p)] -> m (P p b)
-collectMapM f [] = return (PAny [])
+collectMapM _ [] = return (PAny [])
 collectMapM f ((x, weight) : rest) = do
     fx <- f x
     case fx of
@@ -81,7 +91,7 @@ instance (Monad m, Ord p, Num p) => Functor (PT p m) where
 
 instance (Monad m, Ord p, Num p) => Applicative (PT p m) where
     --pure = return
-    pure a = undefined -- trace "Don't call me" $ PT $ return $ PAny [(a, 1)]
+    pure a = trace "Don't call me" $ PT $ return $ PAny [(a, 1)]
     (<*>) = ap
 
 instance (Monad m, Ord p, Num p) => Monad (PT p m) where
@@ -123,6 +133,7 @@ returnP' :: (Monad m, Ord p, Num p, Ord a) => a -> PT p m a
 returnP' a = PT $ return $ returnP a
 
 doMin' :: (Monad m, Ord a, Probability p) => [PT p m a] -> PT p m a
+doMin' [] = undefined
 doMin' [a] = a
 doMin' (a : as) = do
   b <- doMin' as
@@ -130,6 +141,7 @@ doMin' (a : as) = do
   returnP' $ min b c
 
 doMax' :: (Monad m, Ord a, Probability p) => [PT p m a] -> PT p m a
+doMax' [] = undefined
 doMax' [a] = a
 doMax' (a : as) = do
   b <- doMax' as
@@ -152,12 +164,16 @@ takeRollM t r = do
     x <- d 6
     returnProb $ take t (L.insertBy (comparing Down) x y)
 
+condition :: (Probability p, MonadProb p m) => Bool -> m ()
+condition False = pt []
+condition True = returnProb ()
+
 cutoff :: (Monad m, Probability p, MonadReader Int m) => PT p m a -> PT p m a
 cutoff m = do
   depth <- liftP ask
   if depth <= 0
     then PT $ return $ PAny []
-    else local (\depth -> depth - 1) m
+    else local (subtract 1) m
 
 mapPT :: Probability p => (m (P p a) -> n (P p b)) -> PT p m a -> PT p n b
 mapPT f m = PT $ f $ runPT m
@@ -166,6 +182,7 @@ instance (Probability p, MonadReader r m) => MonadReader r (PT p m) where
     local = mapPT . local
     ask = lift ask
 
+{-
 explode :: (Probability p, MonadReader Int m) => PT p m Int
 explode = do
   x <- d 6
@@ -174,6 +191,7 @@ explode = do
       y <- cutoff explode
       returnP' $ x + y
     else returnP' x
+-}
 
 dumpPDF :: (Show a, Show p) => M.Map a p -> IO ()
 dumpPDF pdf = do
@@ -199,10 +217,12 @@ cdfToPdf pdf =
         ps = map snd pdf
     in zip as $ zipWith (-) ps (0 : ps)
 
-multiplyCdf [] [] pc qc = []
-multiplyCdf ((a, p) : ps) [] pc qc =
+multiplyCdf :: (Probability t, Ord a) =>
+                     [(a, t)] -> [(a, t)] -> t -> t -> [(a, t)]
+multiplyCdf [] [] _ _ = []
+multiplyCdf ((a, p) : ps) [] _ qc =
         (a, p * qc) : multiplyCdf ps [] p qc
-multiplyCdf [] ((b, q) : qs) pc qc =
+multiplyCdf [] ((b, q) : qs) pc _ =
         (b, pc * q) : multiplyCdf [] qs pc q
 multiplyCdf ((a, p) : ps) ((b, q) : qs) pc qc =
     case compare a b of
@@ -210,6 +230,7 @@ multiplyCdf ((a, p) : ps) ((b, q) : qs) pc qc =
         GT -> (b, pc * q) : multiplyCdf ((a, p) : ps) qs pc q
         EQ -> (a, p * q) : multiplyCdf ps qs p q
 
+negateCdf :: Probability b => [(a, b)] -> [(a, b)]
 negateCdf [] = []
 negateCdf ((a, p) : as) = (a, 1 - p) : negateCdf as
 
@@ -262,6 +283,7 @@ minof n = do
 data GameState = G {
   playerHitPoints :: Int,
   monsterHitPoints :: Int,
+  target :: Int,
   numRolls :: Int,
   numMatch :: Int
 } deriving (Show, Ord, Eq)
@@ -276,7 +298,7 @@ playerTurn state =
         then do
           damage <- d 8
           let newHitPoints = max 0 (monsterHitPoints state - damage)
-          returnProb $ state { monsterHitPoints = newHitPoints, numRolls = numRolls state + 1, numMatch = numMatch state + (if damage == 8 then 1 else 0) }
+          returnProb $ state { monsterHitPoints = newHitPoints, numRolls = numRolls state + 1, numMatch = numMatch state + (if damage == target state then 1 else 0) }
         else returnProb state
 
 monsterTurn :: (Probability p, MonadProb p m) => GameState -> m GameState
@@ -295,16 +317,16 @@ monsterTurn state =
 simulation :: (Probability p, MonadProb p m) => Int -> GameState -> m GameState
 simulation n state = do
   if n <= 0
-    then return state
+    then returnProb state
     else do
       state' <- simulation (n - 1) state
       state'' <- playerTurn state'
       monsterTurn state''
 
-expectation :: (Probability p) => P p p -> p
+expectation :: (Probability p, Real a) => P p a -> p
 expectation m =
   let pdf = runPOrd m
-  in sum $ zipWith (*) (map fst pdf) (map snd pdf)
+  in sum $ zipWith (*) (map (realToFrac . fst) pdf) (map snd pdf)
 
 conditionalExpectation :: (Probability p) => P p p -> p
 conditionalExpectation m =
@@ -312,7 +334,8 @@ conditionalExpectation m =
       totalProb = sum $ map snd pdf
   in (sum $ zipWith (*) (map fst pdf) (map snd pdf)) / totalProb
 
-main = do
+main' :: IO ()
+main' = do
 {-
     print $ runP $ takeRoll 4 80
     print $ runP $ runIdentity $ runPT $ takeRollM 4 80
@@ -340,12 +363,89 @@ main = do
     dumpPDF $ runP $ runIdentity (runPT $ maxP p0 p1)
     putStrLn "---"
 -}
-    let state = G { playerHitPoints = 10, monsterHitPoints = 10, numRolls = 0, numMatch = 0 }
-    let pdf = runIdentity $ runPT $
-                                      do
-                                        state' <- simulation 100 state
-                                        let a = fromIntegral $ numRolls state'
-                                        let b = fromIntegral $ numMatch state'
-                                        returnProb (b / a)
-    print (runPOrd pdf :: [(Float, Float)])
-    --dumpPDF' $ runP $ runIdentity (runPT $ simulation 100 state)
+    forM_ [1..8] $ \dieRoll -> do
+      let state = G { playerHitPoints = 10, monsterHitPoints = 30, target = dieRoll, numRolls = 0, numMatch = 0 }
+      let pdf = runIdentity $ runPT $
+                                        do
+                                          state' <- simulation 30 state
+                                          condition $ monsterHitPoints state' == 0
+                                          --condition $ numRolls state' > 0
+                                          let a = fromIntegral $ numRolls state'
+                                          let b = fromIntegral $ numMatch state'
+                                          --returnProb b
+                                          returnProb (b, a)
+                                          --returnProb (b / a)
+      let a = conditionalExpectation $ fmap fst pdf :: Double
+      let b = conditionalExpectation $ fmap snd pdf 
+      print $ (a, b, a / b)
+
+     {-
+     (0.44810774170592654,6.168486308864418,7.264468449285097e-2)
+     (0.5221089101518429,6.168486308864425,8.464133403385303e-2)
+     (0.6044012482328872,6.168486308864427,9.798210095146552e-2)
+     (0.6954273455368685,6.16848630886443,0.11273873535838183)
+     (0.7955279194983559,6.168486308864419,0.12896647243184167)
+     (0.9066449388913241,6.168486308864425,0.1469801331306239)
+     (1.0300094677229579,6.16848630886442,0.1669792905664366)
+     (1.1662587371242574,6.168486308864418,0.18906724903454616)
+     -}
+
+explode :: (Probability p, MonadReader Int m) => Int -> PT p m Int
+explode n = do
+  roll <- d n
+  if roll == n
+    then cutoff $ do
+      roll' <- explode n
+      returnProb (roll + roll')
+    else
+      returnProb roll
+
+rollKeep :: (MonadProb p m, Probability p) => Int -> Int -> m Int -> m [Int]
+rollKeep _ 0 _ = returnProb []
+rollKeep 0 _ _ = returnProb []
+rollKeep t r m = do
+    y <- rollKeep t (r - 1) m
+    x <- m
+    returnProb $ take t (L.insertBy (comparing Down) x y)
+
+rollKeep' :: (MonadProb p m, Probability p) => Int -> [m Int] -> m [Int]
+rollKeep' _ [] = returnProb []
+rollKeep' 0 _ = returnProb []
+rollKeep' t (m : ms) = do
+    y <- rollKeep' t ms
+    x <- m
+    returnProb $ take t (L.insertBy (comparing Down) x y)
+
+-- compare https://anydice.com/articles/legend-of-the-five-rings/
+legendOfTheFiveRings = do
+  rolls <- rollKeep 3 6 (explode 10)
+  returnProb $ sum $ rolls
+
+main1 = do
+    dumpPDF $ runP $ runReader (runPT $ legendOfTheFiveRings) 3
+
+-- https://anydice.com/articles/new-world-of-darkness/
+nwod :: (Probability p, MonadReader Int m) => Int -> Int -> PT p m Int
+nwod threshold reroll = do
+  r <- d 10
+  let successes = if r >= threshold then 1 else 0
+  if r >= reroll
+    then cutoff $ do
+      s <- nwod threshold reroll
+      returnProb (successes + s)
+    else
+      returnProb successes
+
+nwod' :: (Probability p, MonadReader Int m) => Int -> Int -> Int -> PT p m Int
+nwod' threshold reroll 0 = returnProb 0
+nwod' threshold reroll n = do
+  s <- nwod' threshold reroll (n - 1)
+  r <- nwod threshold reroll
+  returnProb $ min 10 (r + s)
+
+main = do
+    let pdfAsMap = runP $ runReader (runPT $ nwod' {-success-}8 {-again-}9 7) 10
+    let pdf = M.toList pdfAsMap
+    let pdf' = reverse pdf
+    let cdf = pdfToCdf pdf'
+    dumpPDF (M.fromList $ cdf)
