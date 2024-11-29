@@ -23,18 +23,22 @@ data P p a where
     POrd :: Ord a => M.Map a p -> P p a
     PAny :: [(a, p)] -> P p a
 
+{-
 instance (Num p) => Functor (P p) where
     fmap = liftM
 
 instance (Num p) => Applicative (P p) where
     pure = return
     (<*>) = ap
+-}
 
+{-
 instance (Num p) => Monad (P p) where
     return x = undefined -- PAny [(x, 1)]
     m >>= f =
         let pdf = unP m
         in collectMap f pdf
+-}
 
 {-
 instance (Ord p, Num p) => Foldable (P p) where
@@ -50,9 +54,11 @@ returnP a = POrd $ M.singleton a 1
 
 -- Trim out zero prob XXX
 
+{-
 unP :: P p a -> [(a, p)]
 unP (POrd pdf) = M.toList pdf
 unP (PAny pdf) = pdf
+-}
 
 fromList :: (Num p, Ord a) => [(a, p)] -> M.Map a p
 fromList = M.fromListWith (+)
@@ -66,6 +72,7 @@ scaleList weight = map (id *** (weight *))
 scaleMap :: (Num p, Ord a) => p -> M.Map a p -> M.Map a p
 scaleMap weight = fromList . scaleList weight . M.toList
 
+{-
 collectMap :: Num p => (b -> P p a) -> [(b, p)] -> P p a
 collectMap f []  = PAny []
 collectMap f ((x, weight) : rest) =
@@ -80,6 +87,7 @@ collectMap f ((x, weight) : rest) =
             in case collectMap f rest of
               POrd pdf1 -> POrd $ fromList wpdf0 `union` pdf1
               PAny pdf1 -> PAny $ wpdf0 ++ pdf1
+-}
 
 collectMapM :: (Num p, Monad m) => (a -> m (P p b)) -> [(a, p)] -> m (P p b)
 collectMapM f [] = return (PAny [])
@@ -111,9 +119,11 @@ runP :: (Num p, Ord a) => P p a -> M.Map a p
 runP (POrd pdf) = pdf
 runP (PAny pdf) = fromList pdf
 
+{-
 runP'' :: (Num p) => P p a -> [(a, p)]
 runP'' (POrd pdf) = M.toList pdf
 runP'' (PAny pdf) = pdf
+-}
 
 {-
 chooseP :: (Probability p, Ord a) =>
@@ -147,6 +157,7 @@ takeRoll t r = do
     returnP $ take t (L.insertBy (comparing Down) x y)
 -}
 
+{-
 doMin :: (Ord a, Probability p) => [P p a] -> P p a
 doMin [a] = a
 doMin (a : as) = do
@@ -171,6 +182,7 @@ takeRoll t r = do
 
 runP' :: (Ord a) => P Rational a -> M.Map a Rational
 runP' = runP
+-}
 
 {-
 depth 0 = d 6
@@ -203,7 +215,7 @@ instance (Monad m, Ord p, Num p) => Monad (PT p m) where
 instance Probability p => MonadTrans (PT p) where
     lift m = PT $ do
         x <- m
-        return $ return x
+        return $ PAny [(x, 1)]
 
 liftP :: (Monad m, Probability p, Ord a) => m a -> PT p m a
 liftP m = PT $ do
@@ -337,7 +349,7 @@ maxP m0 m1 = PT $ do
   let cdf0 = pdfToCdf pdf0
   let cdf1 = pdfToCdf pdf1
   let cdf = multiplyCdf cdf0 cdf1 0 0
-  return $ POrd $ M.fromList $ cdfToPdf cdf
+  return $ POrd $ fromList $ cdfToPdf cdf
 
 minP :: (Probability p, Monad m, Ord a) => PT p m a -> PT p m a -> PT p m a
 minP m0 m1 = PT $ do
@@ -346,7 +358,7 @@ minP m0 m1 = PT $ do
   let cdf0 = pdfToCdf pdf0
   let cdf1 = pdfToCdf pdf1
   let cdf = multiplyCdf (negateCdf cdf0) (negateCdf cdf1) 1 1
-  return $ POrd $ M.fromList $ cdfToPdf $ negateCdf cdf
+  return $ POrd $ fromList $ cdfToPdf $ negateCdf cdf
 
 simpleMinP :: (Probability p, Monad m, Ord a) => PT p m a -> PT p m a -> PT p m a
 simpleMinP m0 m1 = do
