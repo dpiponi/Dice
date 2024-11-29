@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs, FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
 module Main where
 
@@ -23,42 +24,10 @@ data P p a where
     POrd :: Ord a => M.Map a p -> P p a
     PAny :: [(a, p)] -> P p a
 
-{-
-instance (Num p) => Functor (P p) where
-    fmap = liftM
-
-instance (Num p) => Applicative (P p) where
-    pure = return
-    (<*>) = ap
--}
-
-{-
-instance (Num p) => Monad (P p) where
-    return x = undefined -- PAny [(x, 1)]
-    m >>= f =
-        let pdf = unP m
-        in collectMap f pdf
--}
-
-{-
-instance (Ord p, Num p) => Foldable (P p) where
-    foldMap f (POrd pdf) = foldMap f (map fst $ M.toList pdf)
-    foldMap f (PAny pdf) = foldMap f (map fst pdf)
-
-instance (Ord p, Num p) => Traversable (P p) where
-    mapM f (POrd pdf) = foldMap f (map fst $ M.toList pdf)
--}
-
 returnP :: (Ord p, Num p, Ord a) => a -> P p a
 returnP a = POrd $ M.singleton a 1
 
 -- Trim out zero prob XXX
-
-{-
-unP :: P p a -> [(a, p)]
-unP (POrd pdf) = M.toList pdf
-unP (PAny pdf) = pdf
--}
 
 fromList :: (Num p, Ord a) => [(a, p)] -> M.Map a p
 fromList = M.fromListWith (+)
@@ -71,23 +40,6 @@ scaleList weight = map (id *** (weight *))
 
 scaleMap :: (Num p, Ord a) => p -> M.Map a p -> M.Map a p
 scaleMap weight = fromList . scaleList weight . M.toList
-
-{-
-collectMap :: Num p => (b -> P p a) -> [(b, p)] -> P p a
-collectMap f []  = PAny []
-collectMap f ((x, weight) : rest) =
-    case f x of
-        POrd pdf0 ->
-            let wpdf0 = scaleMap weight pdf0
-            in case collectMap f rest of
-              POrd pdf1 -> POrd $ wpdf0 `union` pdf1
-              PAny pdf1 -> POrd $ wpdf0 `union` fromList pdf1
-        PAny pdf0 ->
-            let wpdf0 = scaleList weight pdf0
-            in case collectMap f rest of
-              POrd pdf1 -> POrd $ fromList wpdf0 `union` pdf1
-              PAny pdf1 -> PAny $ wpdf0 ++ pdf1
--}
 
 collectMapM :: (Num p, Monad m) => (a -> m (P p b)) -> [(a, p)] -> m (P p b)
 collectMapM f [] = return (PAny [])
@@ -107,89 +59,17 @@ collectMapM f ((x, weight) : rest) = do
               POrd pdf1 -> return $ POrd $ fromList wpdf0 `union` pdf1
               PAny pdf1 -> return $ PAny $ wpdf0 ++ pdf1
 
-{-
-instance (Num p, Applicative (P p)) => Alternative (P p) where
-    empty = PAny []
-    a <|> b = collectMap (\x -> if x then a else b) [(False, 1), (True, 1)]
-
-instance (Num p, Monad (P p), Applicative (P p)) => MonadPlus (P p)
--}
-
 runP :: (Num p, Ord a) => P p a -> M.Map a p
 runP (POrd pdf) = pdf
 runP (PAny pdf) = fromList pdf
 
-{-
 runP'' :: (Num p) => P p a -> [(a, p)]
 runP'' (POrd pdf) = M.toList pdf
 runP'' (PAny pdf) = pdf
--}
-
-{-
-chooseP :: (Probability p, Ord a) =>
-           [a] -> P p a
-chooseP xs = let p = 1/fromIntegral (length xs)
-             in POrd $ fromList $ map (flip (,) p) xs
--}
-
-{-
-bernoulliP :: (Fractional p, Ord p) =>
-              p -> P p Bool
-bernoulliP p = POrd $ fromList $ [(False, 1-p), (True, p)]
--}
 
 -- Slightly unusual among probability monads in that the probabilities
 -- themselves need to be sortable.
 type Probability p = (Ord p, Fractional p)
-
-{-
-d :: Probability p => Int -> P p Int
-d n = chooseP [1 .. n]
--}
-
-{-
-takeRoll :: Probability p => Int -> Int -> P p [Int]
-takeRoll _ 0 = returnP []
-takeRoll 0 _ = returnP []
-takeRoll t r = do
-    y <- takeRoll t (r - 1)
-    x <- d 6
-    returnP $ take t (L.insertBy (comparing Down) x y)
--}
-
-{-
-doMin :: (Ord a, Probability p) => [P p a] -> P p a
-doMin [a] = a
-doMin (a : as) = do
-  b <- doMin as
-  c <- a
-  returnP $ min b c
-
-doMax :: (Ord a, Probability p) => [P p a] -> P p a
-doMax [a] = a
-doMax (a : as) = do
-  b <- doMax as
-  c <- a
-  returnP $ max b c
-
-takeRoll :: (Probability p, Monad m) => Int -> Int -> PT p m [Int]
-takeRoll _ 0 = returnP' []
-takeRoll 0 _ = returnP' []
-takeRoll t r = do
-    y <- takeRoll t (r - 1)
-    x <- d 6
-    returnP' $ take t (L.insertBy (comparing Down) x y)
-
-runP' :: (Ord a) => P Rational a -> M.Map a Rational
-runP' = runP
--}
-
-{-
-depth 0 = d 6
-depth n = do
-  let m = doMin [depth (n-1), depth (n-1)]
-  doMax [m, m]
--}
 
 data PT p m a = PT { runPT :: m (P p a) }
 
@@ -202,12 +82,13 @@ instance (Monad m, Ord p, Num p) => Functor (PT p m) where
     fmap = liftM
 
 instance (Monad m, Ord p, Num p) => Applicative (PT p m) where
-    pure = return
+    --pure = return
+    pure a = PT $ return $ PAny [(a, 1)]
     (<*>) = ap
 
 instance (Monad m, Ord p, Num p) => Monad (PT p m) where
         -- XXX Need to find out why this gets called
-    return a = PT $ return $ PAny [(a, 1)]
+    return = pure
     m >>= k = PT $ do
         a <- runP''T m
         collectMapM (runPT . k) a
@@ -222,12 +103,15 @@ liftP m = PT $ do
     x <- m
     return $ returnP x
 
-bernoulli :: (Fractional p, Monad m, Ord p) => p -> PT p m Bool
-bernoulli p = PT $ return $ POrd $ fromList $ [(False, 1-p), (True, p)]
+class Monad m => MonadProb p m | m -> p where
+  bernoulli :: p -> m Bool
+  choose :: Ord a => [a] -> m a
 
-choose :: (Probability p, Monad m, Ord a) => [a] -> PT p m a
-choose xs = let p = 1 / fromIntegral (length xs)
-            in PT $ return $ POrd $ fromList $ map (flip (,) p) xs
+instance (Monad m, Probability p) => MonadProb p (PT p m) where
+  bernoulli p = PT $ return $ POrd $ fromList $ [(False, 1-p), (True, p)]
+
+  choose xs = let p = 1 / fromIntegral (length xs)
+              in PT $ return $ POrd $ fromList $ map (flip (,) p) xs
 
 d :: (Monad m, Probability p) => Int -> PT p m Int
 d n = choose [1 .. n]
@@ -257,20 +141,6 @@ depth' n = do
   -- in a monad!!!!!!!1
   doMax' [m, m]
 
-{-
-depth'' = do
-    n <- liftP ask
-    depth' n
--}
-
-{-
-test2 = do
-    p <- liftP ask
-    x <- bernoulliP' p
-    y <- bernoulliP' p
-    return (x, y)
--}
-
 takeRollM :: (Monad m, Probability p) => Int -> Int -> PT p m [Int]
 takeRollM _ 0 = returnP' []
 takeRollM 0 _ = returnP' []
@@ -278,14 +148,6 @@ takeRollM t r = do
     y <- takeRollM t (r - 1)
     x <- d 6
     returnP' $ take t (L.insertBy (comparing Down) x y)
-
-{-
-simple :: P Rational Int
-simple = do
-  x <- d 6
-  y <- d 6
-  returnP (x + y)
--}
 
 cutoff :: (Monad m, Probability p, MonadReader Int m) => PT p m a -> PT p m a
 cutoff m = do
