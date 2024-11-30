@@ -1,3 +1,0 @@
-cabal build
-cabal run > data.dat
-gnuplot plot.gnu
