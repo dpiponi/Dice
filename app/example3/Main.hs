@@ -65,7 +65,7 @@ monsterTurn gameState = do
         else certainly gameState
 
 simulation :: (Probability p, MonadProb p m) => Int -> GameState -> m GameState
-simulation n gameState = do
+simulation n gameState =
   if n <= 0
     then certainly gameState
     else certainly gameState >>= simulation (n - 1) >>= playerTurn >>= monsterTurn
