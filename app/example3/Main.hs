@@ -70,9 +70,6 @@ simulation n gameState =
     then certainly gameState
     else certainly gameState >>= simulation (n - 1) >>= playerTurn >>= monsterTurn
 
---initialState = certainly (H 3)
---a = updateState initialState
-
 main :: IO ()
 main = do
     let gameState = G { playerHitPoints = 10, monsterHitPoints = 100 }

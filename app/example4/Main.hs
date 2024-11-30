@@ -75,9 +75,6 @@ simulation n gameState =
     then certainly gameState
     else certainly gameState >>= simulation (n - 1) >>= playerTurn >>= monsterTurn
 
---initialState = certainly (H 3)
---a = updateState initialState
-
 main :: IO ()
 main = do
     forM_ [1..8] $ \dieRoll -> do
@@ -86,12 +83,9 @@ main = do
                                         do
                                           gameState' <- simulation 30 gameState
                                           condition $ monsterHitPoints gameState' == 0
-                                          --condition $ numRolls gameState' > 0
                                           let a = fromIntegral $ numRolls gameState'
                                           let b = fromIntegral $ numMatch gameState'
-                                          --certainly b
                                           certainly (b, a)
-                                          --certainly (b / a)
       let a = conditionalExpectation $ fmap fst pdf :: Double
       let b = conditionalExpectation $ fmap snd pdf 
       putStrLn $ show dieRoll ++ " " ++ show dieRoll ++ " " ++ show (a / b)

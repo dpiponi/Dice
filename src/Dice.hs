@@ -38,7 +38,7 @@ instance Functor (P p) where
   fmap f (POrd ps) = PAny $ map (\(a, b) -> (f a, b)) $ M.toList ps
   fmap f (PAny ps) = PAny $ map (\(a, b) -> (f a, b)) ps
 
-returnP :: (Ord p, Num p, Ord a) => a -> P p a
+returnP :: (Num p, Ord a) => a -> P p a
 returnP a = POrd $ M.singleton a 1
 
 
@@ -69,6 +69,7 @@ collectMapM f ((x, weight) : rest) = do
               POrd pdf1 -> return $ POrd $ fromList wpdf0 `union` pdf1
               PAny pdf1 -> return $ PAny $ wpdf0 ++ pdf1
 
+-- XXX Named incorrectly. Rename runP -> runPAny, runPOrd -> runP
 runP :: (Num p, Ord a) => P p a -> M.Map a p
 runP (POrd pdf) = pdf
 runP (PAny pdf) = fromList pdf
@@ -77,25 +78,23 @@ runPOrd :: (Num p) => P p a -> [(a, p)]
 runPOrd (POrd pdf) = M.toList pdf
 runPOrd (PAny pdf) = pdf
 
--- Slightly unusual among probability monads in that the probabilities
--- themselves need to be sortable.
-type Probability p = (Ord p, Fractional p)
+type Probability p = (Fractional p)
 
 data PT p m a = PT { runPT :: m (P p a) }
 
 runPOrdT :: (Num p, Monad m) => PT p m a -> m [(a, p)]
 runPOrdT (PT m) = fmap runPOrd m
 
-instance (Monad m, Ord p, Num p) => Functor (PT p m) where
+instance (Monad m, Num p) => Functor (PT p m) where
     fmap = liftM
 
-instance (Monad m, Ord p, Num p) => Applicative (PT p m) where
+instance (Monad m, Num p) => Applicative (PT p m) where
     --pure = return
     --pure a = trace "Don't call me" $ PT $ return $ PAny [(a, 1)]
     pure a = PT $ return $ PAny [(a, 1)]
     (<*>) = ap
 
-instance (Monad m, Ord p, Num p) => Monad (PT p m) where
+instance (Monad m, Num p) => Monad (PT p m) where
         -- XXX Need to find out why this gets called
     return = pure
     m >>= k = PT $ do
@@ -138,7 +137,7 @@ nd r n = do
   y <- choose [1 .. n]
   certainly (x + y)
 
-returnP' :: (Monad m, Ord p, Num p, Ord a) => a -> PT p m a
+returnP' :: (Monad m, Num p, Ord a) => a -> PT p m a
 returnP' a = PT $ return $ returnP a
 
 doMin' :: (Monad m, Ord a, Probability p) => [PT p m a] -> PT p m a
@@ -191,24 +190,13 @@ instance (Probability p, MonadReader r m) => MonadReader r (PT p m) where
     local = mapPT . local
     ask = lift ask
 
-{-
-explode :: (Probability p, MonadReader Int m) => PT p m Int
-explode = do
-  x <- d 6
-  if x == 6
-    then do
-      y <- cutoff explode
-      returnP' $ x + y
-    else returnP' x
--}
-
 dumpPDF :: (Show a, Show p) => M.Map a p -> IO ()
 dumpPDF pdf = do
     mapM_ (\(a, p) -> do
       putStrLn $ show a ++ " " ++ show a ++ " " ++ show p 
       ) $ M.toList pdf
 
-dumpPDF' :: (Show a, Probability p, Show p) => M.Map a p -> IO ()
+dumpPDF' :: (Show a, Probability p, Show p, Ord p) => M.Map a p -> IO ()
 dumpPDF' pdf = do
     mapM_ (\(a, p) -> do
       when (p > 1e-20) $ putStrLn $ show a ++ " " ++ show p 
@@ -244,7 +232,6 @@ negateCdf [] = []
 negateCdf ((a, p) : as) = (a, 1 - p) : negateCdf as
 
 maxP :: (Probability p, Monad m, Ord a) => PT p m a -> PT p m a -> PT p m a
---maxP :: (Probability p, Ord a, MonadProb p m) => m a -> m a -> m a
 maxP m0 m1 = PT $ do
   pdf0 <- runPOrdT m0
   pdf1 <- runPOrdT m1
@@ -252,8 +239,8 @@ maxP m0 m1 = PT $ do
   let cdf1 = pdfToCdf pdf1
   let cdf = multiplyCdf cdf0 cdf1 0 0
   return $ POrd $ fromList $ cdfToPdf cdf
-  --cdfToPdf cdf
 
+-- Check correctness
 minP :: (Probability p, Monad m, Ord a) => PT p m a -> PT p m a -> PT p m a
 minP m0 m1 = PT $ do
   pdf0 <- runPOrdT m0
