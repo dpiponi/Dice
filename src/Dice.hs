@@ -137,6 +137,13 @@ nd r n = do
   y <- choose [1 .. n]
   certainly (x + y)
 
+ndFrom :: (MonadProb p m, Probability p) => Int -> Int -> Int -> m Int
+ndFrom 0 _ start = certainly start
+ndFrom r n start = do
+  x <- ndFrom (r - 1) n start
+  y <- choose [1 .. n]
+  certainly (x + y)
+
 returnP' :: (Monad m, Num p, Ord a) => a -> PT p m a
 returnP' a = PT $ return $ returnP a
 
@@ -285,6 +292,12 @@ conditionalExpectation m =
   let pdf = runPOrd m
       totalProb = sum $ map snd pdf
   in (sum $ zipWith (*) (map fst pdf) (map snd pdf)) / totalProb
+
+normalize :: (Probability p) => P p a -> P p a
+normalize m =
+  let pdf = runPOrd m
+      totalProb = sum $ map snd pdf
+  in PAny $ map (\(a, p) -> (a, p / totalProb)) pdf
 
 explode :: (Probability p, MonadReader Int m) => Int -> PT p m Int
 explode n = do
